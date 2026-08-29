@@ -63,8 +63,8 @@ class ExamCreate(BaseModel):
     subject: str = Field(min_length=1, max_length=120)
     exam_date: date
     exam_time: str = Field(default="09:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
-    scope_start: int = Field(ge=0)
-    scope_end: int = Field(gt=0)
+    scope_start: float = Field(ge=0)
+    scope_end: float = Field(gt=0)
     scope_unit: str = Field(default="페이지", max_length=20)
     target_passes: float = Field(default=1.0, ge=1.0, le=5.0)
     priority_chapters: str = Field(default="", max_length=2000)
@@ -79,7 +79,7 @@ class ExamCreate(BaseModel):
 
 class CheckInCreate(BaseModel):
     result: Literal["COMPLETED", "PARTIAL", "MISSED"]
-    actual_scope_end: int | None = None
+    actual_scope_end: float | None = None
 
 
 class TaskTimeUpdate(BaseModel):
@@ -101,9 +101,9 @@ class TaskRead(BaseModel):
     exam_id: int
     study_date: date
     pass_number: int
-    scope_start: int
-    scope_end: int
-    planned_units: int
+    scope_start: float
+    scope_end: float
+    planned_units: float
     status: str
     plan_version: int
     suggested_start_time: str
@@ -115,8 +115,8 @@ class ExamRead(BaseModel):
     subject: str
     exam_date: date
     exam_time: str
-    scope_start: int
-    scope_end: int
+    scope_start: float
+    scope_end: float
     scope_unit: str
     target_passes: float
     current_passes: float
@@ -144,10 +144,11 @@ class PlanLogRead(BaseModel):
 class CompletionLogRead(BaseModel):
     id: int
     task_id: int
+    plan_version: int
     study_date: date
     result: str
-    planned_units: int
-    completed_units: int
+    planned_units: float
+    completed_units: float
     recorded_at: datetime
 
 

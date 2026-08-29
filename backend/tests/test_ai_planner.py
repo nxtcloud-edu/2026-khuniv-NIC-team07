@@ -1,7 +1,9 @@
 import json
 from datetime import date, timedelta
 
-from app.ai_planner import AIPlanTask, AIStudyPlan, _normalize_plan_ranges, generate_study_plan
+import pytest
+
+from app.ai_planner import AIPlanTask, AIStudyPlan, OpenAIPlannerError, _normalize_plan_ranges, _validate_plan, generate_study_plan
 
 
 class FakeResponses:
@@ -69,3 +71,23 @@ def test_replan_range_gaps_are_normalized_from_completed_progress() -> None:
         (1, 5, 10), (2, 1, 2), (2, 3, 10),
     ]
     assert sum(task.scope_end - task.scope_start + 1 for task in normalized.tasks) == 16
+
+
+def test_chapter_ranges_are_normalized_in_tenths() -> None:
+    today = date.today()
+    proposed = AIStudyPlan(summary="챕터 분할", tasks=[
+        AIPlanTask(study_date=today, pass_number=1, scope_start=1, scope_end=1.9, suggested_start_time="19:00", suggested_end_time="20:00"),
+        AIPlanTask(study_date=today + timedelta(days=2), pass_number=1, scope_start=2, scope_end=2.9, suggested_start_time="19:00", suggested_end_time="20:00"),
+    ])
+    normalized, _ = _normalize_plan_ranges(proposed, today, today + timedelta(days=3), 1, 2.9, 0, 2.0, 0.1)
+    assert [(task.scope_start, task.scope_end) for task in normalized.tasks] == [(1.0, 1.9), (2.0, 2.9)]
+    _validate_plan(normalized, today, today + timedelta(days=3), 1, 2.9, 0, 2.0, 0.1)
+
+
+def test_plan_must_use_late_part_of_remaining_period() -> None:
+    today = date.today()
+    early_only = AIStudyPlan(summary="초반 몰아넣기", tasks=[
+        AIPlanTask(study_date=today, pass_number=1, scope_start=1, scope_end=10, suggested_start_time="19:00", suggested_end_time="20:00"),
+    ])
+    with pytest.raises(OpenAIPlannerError, match="기간 후반"):
+        _validate_plan(early_only, today, today + timedelta(days=7), 1, 10, 0, 10, 1.0)
