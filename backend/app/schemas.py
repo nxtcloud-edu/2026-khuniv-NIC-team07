@@ -20,6 +20,7 @@ class EventCreate(BaseModel):
 class EventRead(EventCreate):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    recurrence_group_id: str | None = None
 
 
 class RecurringEventCreate(BaseModel):
@@ -48,6 +49,14 @@ class EventTimeUpdate(BaseModel):
         if self.ends_at <= self.starts_at:
             raise ValueError("종료 시간은 시작 시간보다 늦어야 합니다.")
         return self
+
+
+class EventUpdate(EventCreate):
+    apply_to: Literal["THIS", "SERIES"] = "THIS"
+
+
+class EventDeleteRequest(BaseModel):
+    apply_to: Literal["THIS", "SERIES"] = "THIS"
 
 
 class ExamCreate(BaseModel):
@@ -119,6 +128,27 @@ class ExamRead(BaseModel):
     last_replan_summary: str
     pace_advice: str
     tasks: list[TaskRead]
+    plan_logs: list["PlanLogRead"] = Field(default_factory=list)
+    completion_logs: list["CompletionLogRead"] = Field(default_factory=list)
+
+
+class PlanLogRead(BaseModel):
+    id: int
+    previous_version: int
+    new_version: int
+    explanation: str
+    recommendation: str
+    created_at: datetime
+
+
+class CompletionLogRead(BaseModel):
+    id: int
+    task_id: int
+    study_date: date
+    result: str
+    planned_units: int
+    completed_units: int
+    recorded_at: datetime
 
 
 class OverviewRead(BaseModel):

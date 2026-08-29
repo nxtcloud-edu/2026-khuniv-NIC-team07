@@ -13,6 +13,7 @@ class CalendarEvent(Base):
     event_type: Mapped[str] = mapped_column(String(30), default="OTHER")
     starts_at: Mapped[datetime] = mapped_column(DateTime)
     ends_at: Mapped[datetime] = mapped_column(DateTime)
+    recurrence_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 
 
 class Exam(Base):
@@ -32,6 +33,7 @@ class Exam(Base):
     last_replan_summary: Mapped[str] = mapped_column(String(700), default="")
     pace_advice: Mapped[str] = mapped_column(String(700), default="")
     tasks: Mapped[list["StudyTask"]] = relationship(back_populates="exam", cascade="all, delete-orphan")
+    plan_logs: Mapped[list["PlanChangeLog"]] = relationship(back_populates="exam", cascade="all, delete-orphan")
 
 
 class StudyTask(Base):
@@ -60,3 +62,15 @@ class StudyLog(Base):
     actual_scope_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     recorded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     task: Mapped[StudyTask] = relationship(back_populates="logs")
+
+
+class PlanChangeLog(Base):
+    __tablename__ = "plan_change_logs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    exam_id: Mapped[int] = mapped_column(ForeignKey("exams.id"), index=True)
+    previous_version: Mapped[int] = mapped_column(Integer)
+    new_version: Mapped[int] = mapped_column(Integer)
+    explanation: Mapped[str] = mapped_column(String(700), default="")
+    recommendation: Mapped[str] = mapped_column(String(700), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    exam: Mapped[Exam] = relationship(back_populates="plan_logs")

@@ -66,6 +66,8 @@ def test_partial_check_in_creates_new_plan_version(monkeypatch) -> None:
         assert any(item["plan_version"] == result["new_version"] for item in result["exam"]["tasks"])
         assert "replan_explanation" in result
         assert "recommendation" in result
+        assert result["exam"]["plan_logs"][0]["new_version"] == result["new_version"]
+        assert result["exam"]["completion_logs"][0]["completed_units"] == 1
     finally:
         app.dependency_overrides.clear()
 
@@ -113,6 +115,30 @@ def test_weekly_recurring_event_creates_each_occurrence() -> None:
         assert response.status_code == 201
         assert [event["starts_at"][:10] for event in response.json()] == ["2026-09-01", "2026-09-08", "2026-09-15", "2026-09-22"]
         assert len(overview["events"]) == 4
+        assert len({event["recurrence_group_id"] for event in overview["events"]}) == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_recurring_event_can_update_one_and_delete_series() -> None:
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    TestingSession = sessionmaker(bind=engine)
+    Base.metadata.create_all(engine)
+
+    def override_db():
+        with TestingSession() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            events = client.post("/api/events/recurring", json={"title": "수업", "event_type": "CLASS", "start_date": "2026-09-01", "end_date": "2026-09-15", "start_time": "10:00", "end_time": "11:00"}).json()
+            changed = client.put(f"/api/events/{events[0]['id']}", json={"title": "휴강 보강", "event_type": "CLASS", "starts_at": "2026-09-01T12:00:00", "ends_at": "2026-09-01T13:00:00", "apply_to": "THIS"})
+            client.request("DELETE", f"/api/events/{events[1]['id']}", json={"apply_to": "SERIES"})
+            overview = client.get("/api/overview").json()
+        assert changed.status_code == 200
+        assert changed.json()[0]["title"] == "휴강 보강"
+        assert overview["events"] == []
     finally:
         app.dependency_overrides.clear()
 
