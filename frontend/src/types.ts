@@ -1,0 +1,5 @@
+export interface CalendarEvent { id: number; title: string; event_type: 'CLASS' | 'WORK' | 'APPOINTMENT' | 'OTHER'; starts_at: string; ends_at: string }
+export interface StudyTask { id: number; exam_id: number; study_date: string; pass_number: number; scope_start: number; scope_end: number; planned_units: number; status: 'PLANNED' | 'COMPLETED' | 'PARTIAL' | 'MISSED'; plan_version: number; suggested_start_time: string; suggested_end_time: string }
+export interface Exam { id: number; subject: string; exam_date: string; exam_time: string; scope_start: number; scope_end: number; scope_unit: string; target_passes: number; current_passes: number; forecast_passes: number; plan_version: number; ai_summary: string; priority_chapters: string; planning_preferences: string; last_replan_summary: string; pace_advice: string; tasks: StudyTask[] }
+export interface Overview { events: CalendarEvent[]; exams: Exam[] }
+export interface CheckInResponse { message: string; previous_version: number; new_version: number; changed_tasks: number; performance_delta: number; projected_passes: number; replan_explanation: string; recommendation: string; exam: Exam }
