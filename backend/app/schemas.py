@@ -144,6 +144,7 @@ class PlanLogRead(BaseModel):
 class CompletionLogRead(BaseModel):
     id: int
     task_id: int
+    plan_version: int
     study_date: date
     result: str
     planned_units: int
