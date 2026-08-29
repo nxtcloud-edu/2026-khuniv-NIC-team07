@@ -14,6 +14,7 @@ const minutes=(v:string)=>{const [h,m]=v.split(':').map(Number);return h*60+m}, 
 const mondayOf=(value:Date)=>{const d=new Date(value),day=d.getDay();d.setDate(d.getDate()-(day===0?6:day-1));d.setHours(0,0,0,0);return d}
 export const subjectStyle=(index:number)=>({ '--subject-bg':`hsl(${(index*137.508)%360} 58% 91%)`,'--subject-ink':`hsl(${(index*137.508)%360} 48% 30%)`,'--subject-accent':`hsl(${(index*137.508)%360} 48% 52%)`} as CSSProperties)
 const emptyForm=():EventForm=>({title:'',event_type:'CLASS',start_date:dateKey(new Date()),end_date:dateKey(new Date()),start_time:'09:00',end_time:'10:00',repeat_weekly:false})
+const scopeLabel=(value:number,unit:string)=>unit==='챕터'?value.toFixed(1):String(value)
 
 export default function CalendarPage(){
  const [data,setData]=useState<Overview>({events:[],exams:[]}),[cursor,setCursor]=useState(new Date()),[view,setView]=useState<View>('split'),[selectedDate,setSelectedDate]=useState(dateKey(new Date()))
@@ -26,7 +27,7 @@ export default function CalendarPage(){
  useEffect(()=>localStorage.setItem('calendarSplitPercent',String(split)),[split])
  const items=useMemo<Item[]>(()=>{const subjects=[...new Set(data.exams.map(e=>e.subject))].sort(),styleFor=(subject:string)=>subjectStyle(subjects.indexOf(subject));return [
   ...(showFixed?data.events.map(x=>({id:`event-${x.id}`,sourceId:x.id,source:'event' as const,date:x.starts_at.slice(0,10),title:x.title,detail:x.recurrence_group_id?'반복 고정 일정':'고정 일정',startTime:x.starts_at.slice(11,16),endTime:x.ends_at.slice(11,16),tone:'event',kind:'일정',eventType:x.event_type,recurrenceGroupId:x.recurrence_group_id})):[]),
-  ...data.exams.flatMap(e=>e.tasks.map(x=>({id:`task-${x.id}`,sourceId:x.id,source:'task' as const,date:x.study_date,title:e.subject,detail:`${x.pass_number}회독 · ${x.scope_start}–${x.scope_end} ${e.scope_unit}`,startTime:x.suggested_start_time,endTime:x.suggested_end_time,tone:`${x.status.toLowerCase()} subject-color`,kind:'공부',subjectStyle:styleFor(e.subject)}))),
+  ...data.exams.flatMap(e=>e.tasks.map(x=>({id:`task-${x.id}`,sourceId:x.id,source:'task' as const,date:x.study_date,title:e.subject,detail:`${x.pass_number}회독 · ${scopeLabel(x.scope_start,e.scope_unit)}–${scopeLabel(x.scope_end,e.scope_unit)} ${e.scope_unit}`,startTime:x.suggested_start_time,endTime:x.suggested_end_time,tone:`${x.status.toLowerCase()} subject-color`,kind:'공부',subjectStyle:styleFor(e.subject)}))),
   ...data.exams.map(e=>({id:`exam-${e.id}`,sourceId:e.id,source:'event' as const,date:e.exam_date,title:`${e.subject} 시험`,detail:`목표 ${e.target_passes}회독`,startTime:e.exam_time,endTime:clock(Math.min(1439,minutes(e.exam_time)+60)),tone:'exam subject-color',kind:'시험',subjectStyle:styleFor(e.subject)}))]},[data,showFixed])
  const monthDays=useMemo(()=>{const f=new Date(cursor.getFullYear(),cursor.getMonth(),1),s=new Date(f.getFullYear(),f.getMonth(),1-f.getDay());return Array.from({length:42},(_,i)=>{const d=new Date(s);d.setDate(s.getDate()+i);return d})},[cursor])
  const weekDays=useMemo(()=>{const s=mondayOf(cursor);return Array.from({length:7},(_,i)=>{const d=new Date(s);d.setDate(s.getDate()+i);return d})},[cursor]),dayItems=useMemo(()=>items.filter(x=>x.date===selectedDate).sort((a,b)=>a.startTime.localeCompare(b.startTime)),[items,selectedDate])

@@ -32,11 +32,15 @@ def health_check() -> dict[str, str | bool]:
     return {"status": "ok", "timezone": TIMEZONE, "openai_configured": bool(OPENAI_API_KEY), "openai_model": OPENAI_MODEL}
 
 
-def scope_size(exam: Exam) -> int:
-    return exam.scope_end - exam.scope_start + 1
+def scope_quantum(exam: Exam) -> float:
+    return 0.1 if exam.scope_unit == "챕터" else 1.0
 
 
-def completed_units(db: Session, exam_id: int) -> int:
+def scope_size(exam: Exam) -> float:
+    return round(exam.scope_end - exam.scope_start + 1, 1)
+
+
+def completed_units(db: Session, exam_id: int) -> float:
     logs = db.scalars(select(StudyLog).join(StudyTask).where(StudyTask.exam_id == exam_id)).all()
     return sum(log.completed_units for log in logs)
 
@@ -148,11 +152,12 @@ def create_openai_tasks(db: Session, exam: Exam, start_date: date) -> int:
     blocking.extend({"title": "다른 시험 학습 계획", "starts_at": f"{task.study_date.isoformat()}T{task.suggested_start_time}:00", "ends_at": f"{task.study_date.isoformat()}T{task.suggested_end_time}:00"} for task in other_tasks)
     profile = build_learning_profile(db, exam.subject)
     combined_preferences = "\n".join(part for part in [exam.priority_chapters.strip(), exam.planning_preferences.strip()] if part)
+    planner_scope_end = exam.scope_end + (0.9 if scope_quantum(exam) == 0.1 else 0)
     plan = generate_study_plan(
         subject=exam.subject,
         exam_date=exam.exam_date,
         scope_start=exam.scope_start,
-        scope_end=exam.scope_end,
+        scope_end=planner_scope_end,
         scope_unit=exam.scope_unit,
         target_passes=exam.target_passes,
         completed_units=completed_units(db, exam.id),
@@ -182,7 +187,7 @@ def create_openai_tasks(db: Session, exam: Exam, start_date: date) -> int:
             pass_number=item.pass_number,
             scope_start=item.scope_start,
             scope_end=item.scope_end,
-            planned_units=item.scope_end - item.scope_start + 1,
+            planned_units=round(item.scope_end - item.scope_start + scope_quantum(exam), 1),
             status="PLANNED",
             plan_version=exam.plan_version,
             suggested_start_time=_clock(start),
@@ -337,7 +342,7 @@ def check_in(task_id: int, payload: CheckInCreate, db: Session = Depends(get_db)
             if not task.scope_start <= payload.actual_scope_end <= exam_scope_end(task):
                 raise HTTPException(status_code=422, detail="실제 완료 지점은 현재 회독의 시험 범위 안이어야 합니다.")
             actual_end = payload.actual_scope_end
-            units = actual_end - task.scope_start + 1
+            units = round(actual_end - task.scope_start + scope_quantum(task.exam), 1)
         else:
             units, actual_end = task.planned_units, task.scope_end
     elif payload.result == "MISSED":
@@ -345,7 +350,7 @@ def check_in(task_id: int, payload: CheckInCreate, db: Session = Depends(get_db)
     else:
         if payload.actual_scope_end is None or not task.scope_start <= payload.actual_scope_end < task.scope_end:
             raise HTTPException(status_code=422, detail="일부 완료 지점은 계획 범위 안에 있어야 합니다.")
-        units, actual_end = payload.actual_scope_end - task.scope_start + 1, payload.actual_scope_end
+        units, actual_end = round(payload.actual_scope_end - task.scope_start + scope_quantum(task.exam), 1), payload.actual_scope_end
     task.status = payload.result
     db.add(StudyLog(task_id=task.id, result=payload.result, completed_units=units, actual_scope_end=actual_end))
     db.flush()
@@ -379,8 +384,8 @@ def check_in(task_id: int, payload: CheckInCreate, db: Session = Depends(get_db)
     return CheckInResponse(message="실제 수행량을 반영해 남은 계획을 다시 배분했습니다.", previous_version=previous_version, new_version=refreshed.plan_version, changed_tasks=changed, performance_delta=performance_delta, projected_passes=projected, replan_explanation=explanation, recommendation=advice, exam=serialize_exam(db, refreshed))
 
 
-def exam_scope_end(task: StudyTask) -> int:
-    return task.exam.scope_end
+def exam_scope_end(task: StudyTask) -> float:
+    return task.exam.scope_end + (0.9 if scope_quantum(task.exam) == 0.1 else 0)
 
 
 @app.post("/api/demo/reset", response_model=OverviewRead)
