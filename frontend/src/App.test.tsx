@@ -38,6 +38,14 @@ test('offers weekly recurring dates and a split resize handle', async () => {
   expect(screen.getByRole('button', { name: '월간과 일간 캘린더 너비 조절' })).toBeInTheDocument()
 })
 
+test('can hide fixed calendar events', async () => {
+  await act(async () => { render(<MemoryRouter><CalendarPage/></MemoryRouter>) })
+  const toggle = screen.getByRole('button', { name: '고정 일정 숨기기' })
+  expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  fireEvent.click(toggle)
+  expect(screen.getByRole('button', { name: '고정 일정 보이기' })).toHaveAttribute('aria-pressed', 'false')
+})
+
 test('assigns different colors to different subject positions', () => {
   expect(subjectStyle(0)).not.toEqual(subjectStyle(1))
 })
@@ -54,9 +62,9 @@ test('shows planning status only while an exam plan request is running', async (
   await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
 })
 
-test('accepts freeform planning preferences for the AI plan', () => {
+test('accepts combined freeform planning preferences for the AI plan', () => {
   render(<MemoryRouter><ExamRegister/></MemoryRouter>)
-  const preferences = screen.getByLabelText(/^과목 특성 및 계획 요구사항/)
+  const preferences = screen.getByLabelText(/^우선 범위·과목 특성·계획 요구사항/)
   fireEvent.change(preferences, { target: { value: '시험 전 이틀은 복습만 하고 싶어요.' } })
   expect(preferences).toHaveValue('시험 전 이틀은 복습만 하고 싶어요.')
 })

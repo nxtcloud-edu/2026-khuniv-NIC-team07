@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,8 +11,8 @@ from sqlalchemy.orm import Session, selectinload
 from app.ai_planner import OpenAIPlannerError, generate_study_plan
 from app.config import OPENAI_API_KEY, OPENAI_MODEL, TIMEZONE
 from app.database import Base, SessionLocal, engine, get_db, migrate_runtime_schema
-from app.models import CalendarEvent, Exam, StudyLog, StudyTask
-from app.schemas import CheckInCreate, CheckInResponse, EventCreate, EventRead, EventTimeUpdate, ExamCreate, ExamRead, OverviewRead, RecurringEventCreate, TaskRead, TaskTimeUpdate
+from app.models import CalendarEvent, Exam, PlanChangeLog, StudyLog, StudyTask
+from app.schemas import CheckInCreate, CheckInResponse, CompletionLogRead, EventCreate, EventDeleteRequest, EventRead, EventTimeUpdate, EventUpdate, ExamCreate, ExamRead, OverviewRead, PlanLogRead, RecurringEventCreate, TaskRead, TaskTimeUpdate
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -146,6 +147,7 @@ def create_openai_tasks(db: Session, exam: Exam, start_date: date) -> int:
     blocking = [{"title": event.title, "starts_at": event.starts_at.isoformat(), "ends_at": event.ends_at.isoformat()} for event in events]
     blocking.extend({"title": "다른 시험 학습 계획", "starts_at": f"{task.study_date.isoformat()}T{task.suggested_start_time}:00", "ends_at": f"{task.study_date.isoformat()}T{task.suggested_end_time}:00"} for task in other_tasks)
     profile = build_learning_profile(db, exam.subject)
+    combined_preferences = "\n".join(part for part in [exam.priority_chapters.strip(), exam.planning_preferences.strip()] if part)
     plan = generate_study_plan(
         subject=exam.subject,
         exam_date=exam.exam_date,
@@ -156,8 +158,7 @@ def create_openai_tasks(db: Session, exam: Exam, start_date: date) -> int:
         completed_units=completed_units(db, exam.id),
         start_date=start_date,
         events=blocking,
-        priority_chapters=exam.priority_chapters,
-        planning_preferences=exam.planning_preferences,
+        planning_preferences=combined_preferences,
         learning_profile=profile,
     )
     if profile["sample_size"]:
@@ -193,7 +194,9 @@ def create_openai_tasks(db: Session, exam: Exam, start_date: date) -> int:
 
 def serialize_exam(db: Session, exam: Exam) -> ExamRead:
     done = completed_units(db, exam.id)
-    return ExamRead(id=exam.id, subject=exam.subject, exam_date=exam.exam_date, exam_time=exam.exam_time, scope_start=exam.scope_start, scope_end=exam.scope_end, scope_unit=exam.scope_unit, target_passes=exam.target_passes, current_passes=round(done / scope_size(exam), 2), forecast_passes=forecast_passes(db, exam), plan_version=exam.plan_version, ai_summary=exam.ai_summary, priority_chapters=exam.priority_chapters, planning_preferences=exam.planning_preferences, last_replan_summary=exam.last_replan_summary, pace_advice=exam.pace_advice, tasks=[TaskRead.model_validate(task) for task in sorted(exam.tasks, key=lambda item: (item.study_date, item.suggested_start_time, item.id))])
+    log_rows = db.execute(select(StudyLog, StudyTask).join(StudyTask).where(StudyTask.exam_id == exam.id).order_by(StudyLog.recorded_at)).all()
+    plan_logs = db.scalars(select(PlanChangeLog).where(PlanChangeLog.exam_id == exam.id).order_by(PlanChangeLog.created_at.desc())).all()
+    return ExamRead(id=exam.id, subject=exam.subject, exam_date=exam.exam_date, exam_time=exam.exam_time, scope_start=exam.scope_start, scope_end=exam.scope_end, scope_unit=exam.scope_unit, target_passes=exam.target_passes, current_passes=round(done / scope_size(exam), 2), forecast_passes=forecast_passes(db, exam), plan_version=exam.plan_version, ai_summary=exam.ai_summary, priority_chapters=exam.priority_chapters, planning_preferences=exam.planning_preferences, last_replan_summary=exam.last_replan_summary, pace_advice=exam.pace_advice, tasks=[TaskRead.model_validate(task) for task in sorted(exam.tasks, key=lambda item: (item.study_date, item.suggested_start_time, item.id))], plan_logs=[PlanLogRead.model_validate(log, from_attributes=True) for log in plan_logs], completion_logs=[CompletionLogRead(id=log.id, task_id=task.id, study_date=task.study_date, result=log.result, planned_units=task.planned_units, completed_units=log.completed_units, recorded_at=log.recorded_at) for log, task in log_rows])
 
 
 @app.get("/api/overview", response_model=OverviewRead)
@@ -215,6 +218,7 @@ def create_event(payload: EventCreate, db: Session = Depends(get_db)) -> EventRe
 @app.post("/api/events/recurring", response_model=list[EventRead], status_code=201)
 def create_recurring_event(payload: RecurringEventCreate, db: Session = Depends(get_db)) -> list[EventRead]:
     events: list[CalendarEvent] = []
+    group_id = str(uuid4())
     occurrence_date = payload.start_date
     while occurrence_date <= payload.end_date:
         event = CalendarEvent(
@@ -222,6 +226,7 @@ def create_recurring_event(payload: RecurringEventCreate, db: Session = Depends(
             event_type=payload.event_type,
             starts_at=datetime.combine(occurrence_date, payload.start_time),
             ends_at=datetime.combine(occurrence_date, payload.end_time),
+            recurrence_group_id=group_id,
         )
         db.add(event)
         events.append(event)
@@ -240,6 +245,41 @@ def update_event_time(event_id: int, payload: EventTimeUpdate, db: Session = Dep
     event.starts_at, event.ends_at = payload.starts_at, payload.ends_at
     db.commit(); db.refresh(event)
     return EventRead.model_validate(event)
+
+
+@app.put("/api/events/{event_id}", response_model=list[EventRead])
+def update_event(event_id: int, payload: EventUpdate, db: Session = Depends(get_db)) -> list[EventRead]:
+    event = db.get(CalendarEvent, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다.")
+    targets = [event]
+    if payload.apply_to == "SERIES" and event.recurrence_group_id:
+        targets = db.scalars(select(CalendarEvent).where(CalendarEvent.recurrence_group_id == event.recurrence_group_id)).all()
+    start_delta = payload.starts_at - event.starts_at
+    end_delta = payload.ends_at - event.ends_at
+    for target in targets:
+        target.title = payload.title
+        target.event_type = payload.event_type
+        if payload.apply_to == "SERIES" and event.recurrence_group_id:
+            target.starts_at += start_delta
+            target.ends_at += end_delta
+        else:
+            target.starts_at, target.ends_at = payload.starts_at, payload.ends_at
+    db.commit()
+    return [EventRead.model_validate(target) for target in targets]
+
+
+@app.delete("/api/events/{event_id}", status_code=204)
+def delete_event(event_id: int, payload: EventDeleteRequest | None = None, db: Session = Depends(get_db)) -> None:
+    event = db.get(CalendarEvent, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다.")
+    apply_to = payload.apply_to if payload else "THIS"
+    if apply_to == "SERIES" and event.recurrence_group_id:
+        db.execute(delete(CalendarEvent).where(CalendarEvent.recurrence_group_id == event.recurrence_group_id))
+    else:
+        db.delete(event)
+    db.commit()
 
 
 @app.post("/api/exams", response_model=ExamRead, status_code=201)
@@ -332,6 +372,7 @@ def check_in(task_id: int, payload: CheckInCreate, db: Session = Depends(get_db)
     else:
         advice = f"현재 속도라면 약 {projected}회독이 예상되어 목표 {exam.target_passes}회독을 유지해도 좋습니다."
     exam.last_replan_summary, exam.pace_advice = explanation, advice
+    db.add(PlanChangeLog(exam_id=exam.id, previous_version=previous_version, new_version=exam.plan_version, explanation=explanation, recommendation=advice))
     db.commit()
     refreshed = db.scalar(select(Exam).where(Exam.id == exam.id).options(selectinload(Exam.tasks)))
     assert refreshed is not None
@@ -344,7 +385,7 @@ def exam_scope_end(task: StudyTask) -> int:
 
 @app.post("/api/demo/reset", response_model=OverviewRead)
 def reset_demo(db: Session = Depends(get_db)) -> OverviewRead:
-    db.execute(delete(StudyLog)); db.execute(delete(StudyTask)); db.execute(delete(Exam)); db.execute(delete(CalendarEvent))
+    db.execute(delete(StudyLog)); db.execute(delete(StudyTask)); db.execute(delete(PlanChangeLog)); db.execute(delete(Exam)); db.execute(delete(CalendarEvent))
     today = date.today()
     db.add_all([
         CalendarEvent(title="전공 수업", event_type="CLASS", starts_at=datetime.combine(today + timedelta(days=1), datetime.min.time()).replace(hour=10), ends_at=datetime.combine(today + timedelta(days=1), datetime.min.time()).replace(hour=15)),

@@ -47,4 +47,9 @@ def migrate_runtime_schema() -> None:
             if "suggested_end_time" not in task_columns:
                 connection.execute(text("ALTER TABLE study_tasks ADD COLUMN suggested_end_time VARCHAR(5) NOT NULL DEFAULT '20:00'"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS idx_study_tasks_date_time ON study_tasks (study_date, suggested_start_time)"))
+        if "calendar_events" in inspector.get_table_names():
+            event_columns = {column["name"] for column in inspector.get_columns("calendar_events")}
+            if "recurrence_group_id" not in event_columns:
+                connection.execute(text("ALTER TABLE calendar_events ADD COLUMN recurrence_group_id VARCHAR(36)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_calendar_events_recurrence_group_id ON calendar_events (recurrence_group_id)"))
         connection.execute(text("PRAGMA optimize"))

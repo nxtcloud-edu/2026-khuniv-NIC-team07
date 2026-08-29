@@ -85,8 +85,7 @@ def generate_study_plan(
             "scope_end": scope_end,
             "scope_unit": scope_unit,
             "target_passes": target_passes,
-            "priority_chapters": priority_chapters,
-            "planning_preferences": planning_preferences,
+            "planning_preferences": "\n".join(part for part in [priority_chapters.strip(), planning_preferences.strip()] if part),
         },
         "progress": {
             "completed_units_across_passes": completed_units,
@@ -101,8 +100,8 @@ def generate_study_plan(
         "당신은 대학생 시험 계획을 만드는 일정 최적화 엔진이다. "
         "시험 당일에는 공부를 배정하지 말고, 고정 일정과 시간이 겹치지 않게 하라. "
         "blocking_events에는 다른 시험의 공부 계획도 포함된다. 어떤 시간도 겹치게 배정하지 마라. "
-        "priority_chapters가 있으면 강조된 범위를 앞쪽 날짜와 집중하기 좋은 시간에 우선 배치하라. "
-        "planning_preferences는 사용자가 자연어로 직접 작성한 과목 특성 및 계획 요구사항이다. "
+        "planning_preferences는 사용자가 자연어로 직접 작성한 우선 범위, 과목 특성 및 계획 요구사항이다. "
+        "강조된 범위가 있으면 앞쪽 날짜와 집중하기 좋은 시간에 우선 배치하라. "
         "시험 기간, 목표량, 고정 일정, 범위 연속성 규칙을 위반하지 않는 선에서 날짜별 분량, 반복 빈도, "
         "학습 시간과 복습 배치에 그대로 반영하라. 다른 입력과 충돌하면 필수 제약을 우선하라. "
         "범위를 회독 순서대로 빠짐없이 배정하고 같은 회독 안에서 중복시키지 마라. "
